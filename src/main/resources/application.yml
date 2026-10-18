@@ -32,3 +32,15 @@ management:
     health:
       show-details: never
       show-components: never
+
+app:
+  retention-days: ${NOTIFICATION_RETENTION_DAYS:90}
+  security:
+    internal-service-key: ${INTERNAL_SERVICE_KEY:notification-secret-key}
+    jwt:
+      public-key-location: ${JWT_PUBLIC_KEY_LOCATION:classpath:jwt/public.pem}
+      issuer: ${JWT_ISSUER:urn:soa:user-service}
+      audience: ${JWT_AUDIENCE:soa-api}
+  user-service:
+    base-url: ${USER_SERVICE_BASE_URL:http://localhost:8081}
+

@@ -28,3 +28,24 @@ Tham chiếu kỹ thuật: https://docs.spring.io/spring-boot/3.5/system-require
 - PostgreSQL localhost:5432 có mở port nhưng chưa kiểm tra xác thực/migration trên DB local vì không có credential. Không tạo/sửa role hoặc database trên instance đó.
 - Health được kiểm tra trên port ngẫu nhiên của integration test; chưa chạy jar trên 8086 hoặc kiểm tra `.env` với secret thực. Cổng8086 và cơ chế import `.env` được cấu hình trong application.yml. Build/test không cần `.env`.
 - Chưa kiểm tra Kafka/User/Gateway và REST nghiệp vụ, nằm ngoài phạm vi lượt này.
+
+## Hoàn thành Phase 1: Security, Entities, Repository & 4 REST Endpoints (18/10/2026)
+
+- **Dependencies:** Bổ sung `spring-boot-starter-security`, `spring-boot-starter-oauth2-resource-server`, `spring-boot-starter-validation`, `spring-security-test`.
+- **Entities & Schema:**
+  - `NotificationEntity` và `NotificationReceiptEntity` khớp 100% Flyway V1 schema với `ddl-auto: validate`. `payload_hash` map `bpchar` đúng chuẩn PostgreSQL `CHAR(64)`.
+  - Enum chuẩn hóa: `NotificationType` (10 types), `ReferenceType` (OFFER, CONVERSATION, CONTRACT, DEPOSIT, ACCOUNT), `NotificationStatus` (UNREAD, READ).
+- **Security & Authorization:**
+  - Cấu hình Spring Security Resource Server xác thực RS256 JWT (`urn:soa:user-service`, `aud: soa-api`, clock-skew 60s).
+  - Tách subject `sub` (accountId UUID) và roles (`ROLE_FARMER`, `ROLE_TRADER`, `ROLE_ADMIN`).
+  - RestAuthenticationEntryPoint và RestAccessDeniedHandler trả về JSON ErrorResponse chuẩn contract `{timestamp, status, code, message, path}`.
+- **Inter-service check:**
+  - `UserServiceClient` gọi `GET /internal/v1/accounts/{sub}/access-state` với `X-Service-Key` và timeout tổng 1 giây. Nếu state không ACTIVE trả 403 `ACCOUNT_NOT_ACTIVE`; lỗi/timeout trả 503 `ACCESS_STATE_UNAVAILABLE`.
+- **4 REST Endpoints (`/api/v1/notifications`):**
+  1. `GET /api/v1/notifications`: Danh sách phân trang (`page`, `size` tối đa 100), filter `isRead`, `type`, sort `createdAt DESC, notificationId DESC`.
+  2. `GET /api/v1/notifications/{notificationId}`: Chi tiết thông báo, kiểm tra quyền sở hữu chính chủ (kể cả ADMIN không xem được của người khác -> 404).
+  3. `PATCH /api/v1/notifications/{notificationId}/read`: Đánh dấu đọc có điều kiện atomic, idempotent, giữ nguyên `readAt` lần đầu.
+  4. `GET /api/v1/notifications/unread-count`: Đếm số thông báo UNREAD trong vòng 90 ngày.
+  - Cutoff retention 90 ngày (`createdAt > now - 90 days`) được áp dụng nhất quán trên tất cả 4 endpoint.
+- **Test Results:** 10/10 tests pass (3 FoundationTest, 7 NotificationControllerTest) trên PostgreSQL Testcontainers thật.
+

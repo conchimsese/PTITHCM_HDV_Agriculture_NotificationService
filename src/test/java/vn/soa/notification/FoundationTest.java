@@ -41,7 +41,7 @@ class FoundationTest {
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(response.getBody()).isEqualTo("{\"status\":\"UP\"}");
         assertThat(http.getForEntity("/actuator/env", String.class).getStatusCode().value()).isEqualTo(404);
-        assertThat(http.getForEntity("/api/v1/notifications", String.class).getStatusCode().value()).isEqualTo(404);
+        assertThat(http.getForEntity("/api/v1/notifications", String.class).getStatusCode().value()).isEqualTo(401);
     }
 
     @Test
