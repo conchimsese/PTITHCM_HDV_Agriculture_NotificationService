@@ -85,4 +85,21 @@ Tham chiếu kỹ thuật: https://docs.spring.io/spring-boot/3.5/system-require
   - Group ID: `notification-service-v1`.
 - **Test Results:** 15/15 tests pass (3 FoundationTest, 7 NotificationControllerTest, 5 EventConsumerServiceTest) trên Testcontainers PostgreSQL thật.
 
+## Hoàn thành Phase 3: Idempotency, Transaction Boundaries & Dedup Engine (19/10/2026)
+
+- **Độc lập và tính bất biến của Canonical SHA-256 Hash (`CanonicalJsonUtil`):**
+  - Tự động sắp xếp trường JSON theo thứ tự bảng chữ cái (`ORDER_MAP_ENTRIES_BY_KEYS`).
+  - Sắp xếp và loại trùng danh sách `recipientIds` tăng dần để thứ tự hoặc trùng lặp người nhận không làm biến đổi chuỗi hash đại diện.
+  - Kiểm thử `CanonicalJsonUtilTest` chứng minh payload đảo thứ tự key hoặc duplicate recipients đều sinh cùng một mã hash 64-character SHA-256 chính xác.
+- **Biên độ giao dịch (Transaction Boundaries) & Advisory Lock:**
+  - `pg_advisory_xact_lock(eventId)` giữ khóa cho đến khi transaction kết thúc (commit hoặc rollback), ngăn ngừa triệt để 2 consumer cạnh tranh xử lý cùng 1 eventId.
+  - Toàn bộ `notification_receipts` và `notifications` cho tất cả người nhận đều ghi trong **cùng 1 DB transaction**. Nếu bất kỳ người nhận nào phát sinh lỗi -> toàn bộ sự kiện được rollback sạch sẽ.
+- **Kiểm soát tính lũy thừa (Idempotency) & Bảo toàn Receipt:**
+  - Duplicate cùng payload: Trở về thành công ngay lập tức mà không ghi trùng dữ liệu vào database.
+  - Replay sau khi dữ liệu `notifications` bị xóa do retention 90 ngày: Bản ghi `notification_receipts` vẫn tồn tại bền vững, phát hiện duplicate và ngăn chặn tái tạo thông báo cũ.
+  - Event khác nhau (`eventId` khác nhau) nhưng có cùng nội dung nghiệp vụ: Không tự ý dedup ngoài hợp đồng, mỗi `eventId` được xử lý độc lập đúng ranh giới.
+  - Cùng `eventId` nhưng payload khác nhau -> Ném `EventIdReusedException` báo vi phạm `EVENT_ID_REUSED`.
+- **Test Results:** 20/20 tests pass (3 FoundationTest, 7 NotificationControllerTest, 8 EventConsumerServiceTest, 2 CanonicalJsonUtilTest).
+
+
 

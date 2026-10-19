@@ -197,4 +197,73 @@ class EventConsumerServiceTest {
         assertThatThrownBy(() -> eventConsumerService.processEvent(invalid))
                 .isInstanceOf(InvalidEventException.class);
     }
+
+    @Test
+    void multiRecipient_AtomicityAndDeduplication() throws Exception {
+        UUID user1 = UUID.randomUUID();
+        UUID user2 = UUID.randomUUID();
+        UUID eventId = UUID.randomUUID();
+
+        // 2 recipients + duplicate of user1
+        EventEnvelope envelope = new EventEnvelope(
+                eventId, "CONTRACT_CREATED", 1, "payment-service",
+                java.time.Instant.now(), null, List.of(user1, user2, user1),
+                vn.soa.notification.entity.ReferenceType.CONTRACT, UUID.randomUUID(), null,
+                objectMapper.readTree("{\"contractId\":\"" + UUID.randomUUID() + "\"}")
+        );
+
+        eventConsumerService.processEvent(envelope);
+
+        // Exactly 2 receipts (1 for each distinct recipient)
+        List<NotificationReceiptEntity> receipts = receiptRepository.findAll().stream()
+                .filter(r -> r.getId().getEventId().equals(eventId))
+                .toList();
+        assertThat(receipts).hasSize(2);
+
+        // Exactly 2 notifications
+        List<NotificationEntity> notis = notificationRepository.findAll().stream()
+                .filter(n -> n.getEventId().equals(eventId))
+                .toList();
+        assertThat(notis).hasSize(2);
+        assertThat(notis).extracting(NotificationEntity::getRecipientId)
+                .containsExactlyInAnyOrder(user1, user2);
+    }
+
+    @Test
+    void replayAfterNotificationDeletion_PreservesReceiptAndDoesNotRecreateNotification() throws Exception {
+        EventEnvelope envelope = loadFixture("offer_created.json");
+        eventConsumerService.processEvent(envelope);
+
+        assertThat(notificationRepository.count()).isEqualTo(1);
+        assertThat(receiptRepository.count()).isEqualTo(1);
+
+        // Simulate 90-day retention cleanup of notification content (receipts survive)
+        notificationRepository.deleteAll();
+        assertThat(notificationRepository.count()).isZero();
+        assertThat(receiptRepository.count()).isEqualTo(1);
+
+        // Replay same event -> should be treated as idempotent duplicate, NOT recreating notification
+        eventConsumerService.processEvent(envelope);
+        assertThat(notificationRepository.count()).isZero();
+        assertThat(receiptRepository.count()).isEqualTo(1);
+    }
+
+    @Test
+    void differentEventId_SameBusinessPayload_NotTreatedAsDuplicate() throws Exception {
+        EventEnvelope env1 = loadFixture("offer_created.json");
+        eventConsumerService.processEvent(env1);
+
+        // Different eventId with exact same business data (e.g., second offer or re-issued event)
+        EventEnvelope env2 = new EventEnvelope(
+                UUID.randomUUID(), env1.eventType(), env1.eventVersion(), env1.sourceService(),
+                env1.occurredAt(), env1.actorId(), env1.recipientIds(),
+                env1.referenceType(), env1.referenceId(), env1.correlationId(), env1.data()
+        );
+
+        eventConsumerService.processEvent(env2);
+
+        // Both events must be persisted because eventId is the boundary, no artificial cross-event dedup
+        assertThat(receiptRepository.count()).isEqualTo(2);
+        assertThat(notificationRepository.count()).isEqualTo(2);
+    }
 }
