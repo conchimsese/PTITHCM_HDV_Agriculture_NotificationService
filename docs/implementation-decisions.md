@@ -49,3 +49,40 @@ Tham chiếu kỹ thuật: https://docs.spring.io/spring-boot/3.5/system-require
   - Cutoff retention 90 ngày (`createdAt > now - 90 days`) được áp dụng nhất quán trên tất cả 4 endpoint.
 - **Test Results:** 10/10 tests pass (3 FoundationTest, 7 NotificationControllerTest) trên PostgreSQL Testcontainers thật.
 
+## Hoàn thành Phase 2: Kafka Consumer, 10 Event Contracts & Template Mapping (19/10/2026)
+
+- **Dependencies:** Bổ sung `spring-kafka`, `spring-kafka-test`, `testcontainers:kafka`.
+- **Event Envelope v1:**
+  - `EventEnvelope` record: `eventId`, `eventType`, `eventVersion: 1`, `sourceService`, `occurredAt`, `actorId`, `recipientIds`, `referenceType`, `referenceId`, `correlationId`, `data`.
+  - Validate nghiêm ngặt các trường bắt buộc; dữ liệu optional tương thích hợp đồng.
+- **10 Golden Fixtures:** Đã tạo đủ 10 fixture JSON chuẩn tại `src/test/resources/fixtures/`:
+  1. `offer_created.json` (`trading-service`)
+  2. `offer_accepted.json` (`trading-service`)
+  3. `message_created.json` (`chat-service`)
+  4. `contract_created.json` (`payment-service`)
+  5. `contract_status_changed.json` (`payment-service`)
+  6. `deposit_paid.json` (`payment-service`)
+  7. `deposit_status_changed.json` (`payment-service`)
+  8. `reputation_changed.json` (`user-service`)
+  9. `account_locked.json` (`user-service`)
+  10. `account_unlocked.json` (`user-service`)
+- **Template Engine (`NotificationTemplateEngine`):**
+  - Khớp 100% template tiếng Việt theo Contract v2.1 §14.
+  - Quy tắc đặc thù: `DEPOSIT_STATUS_CHANGED` khi `status = 'LOCKED'` không tạo notification (chỉ lưu receipt hash để dedup); `DEPOSIT_PAID` tạo thông báo cọc đã thanh toán.
+- **Cơ chế Dedup & Transaction (`EventConsumerService`):**
+  - PostgreSQL transaction advisory lock theo `eventId` (`pg_advisory_xact_lock`).
+  - Hash canonical SHA-256 payload ổn định (`CanonicalJsonUtil`), tự động sort/deduplicate `recipientIds`.
+  - Phát hiện `EVENT_ID_REUSED`: Nếu cùng `eventId` nhưng payload hash khác nhau -> bắn `EventIdReusedException` (để định tuyến sang DLT ở Phase 3/4).
+  - Persist toàn bộ `notification_receipts` và `notifications` trong cùng 1 database transaction; commit offset Kafka chỉ sau khi DB commit (`MANUAL_IMMEDIATE`).
+- **Kafka Listener & Topics:**
+  - `NotificationKafkaListener` subscribe 6 topic kinh doanh:
+    - `soa.trading.offer.v1`
+    - `soa.chat.message.v1`
+    - `soa.contract.lifecycle.v1`
+    - `soa.payment.deposit.v1`
+    - `soa.user.reputation.v1`
+    - `soa.user.account.v1`
+  - Group ID: `notification-service-v1`.
+- **Test Results:** 15/15 tests pass (3 FoundationTest, 7 NotificationControllerTest, 5 EventConsumerServiceTest) trên Testcontainers PostgreSQL thật.
+
+
