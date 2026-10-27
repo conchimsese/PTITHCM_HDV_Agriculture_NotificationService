@@ -124,6 +124,29 @@ Tham chiếu kỹ thuật: https://docs.spring.io/spring-boot/3.5/system-require
   - `KafkaRetryDltServiceTest`: 7 tests
   - `NotificationCleanupJobTest`: 1 test
 
+## Hoàn thành Phase 5: Integration User/Gateway/Producer Fixtures, Docker & Hoàn tất Dự án (27/10/2026)
+
+- **Kiểm thử tích hợp chuỗi liên dịch vụ (`UserGatewayProducerIntegrationTest`):**
+  - Giả lập toàn bộ luồng tích hợp: Producer Kafka -> Consumer Notification Service -> User Service Access-State -> API Gateway REST.
+  - Sử dụng `MockWebServer` để mô phỏng chính xác hành vi của User Service HTTP endpoint `/internal/v1/accounts/{accountId}/access-state` với `X-Service-Key`.
+  - **Kiểm chứng tài khoản LOCKED**: Consumer Kafka vẫn tiếp nhận và persist thông báo bình thường (cho mục đích lưu vết khi mở khóa), nhưng các cuộc gọi REST qua Gateway từ tài khoản LOCKED bị chặn trả về `403 ACCOUNT_NOT_ACTIVE`.
+  - **Kiểm chứng User Service gặp sự cố/timeout**: Hệ thống trả về `503 ACCESS_STATE_UNAVAILABLE` mà không bao giờ fallback cho phép truy cập trái phép.
+- **Đóng gói Docker & Docker Compose (`Dockerfile`, `docker-compose.yml`):**
+  - Multi-stage build `Dockerfile` tối ưu dựa trên Eclipse Temurin 21 (alpine), chạy bằng non-root user `appuser`.
+  - `docker-compose.yml`: Định nghĩa đầy đủ môi trường cục bộ gồm PostgreSQL 16, Kafka (KRaft), và Notification Service với healthcheck và biến môi trường cấu hình sẵn.
+- **Tài liệu & Cấu hình môi trường:**
+  - Cập nhật `.env.example` đầy đủ 12 biến môi trường theo quy chuẩn microservice.
+  - Cập nhật `README.md` mô tả toàn bộ kiến trúc, API contract, các luồng nghiệp vụ, hướng dẫn triển khai bằng Docker/Maven.
+- **Tổng kết kiểm thử tự động toàn dự án:** **31/31 tests PASS 100%**:
+  - `FoundationTest`: 3 tests
+  - `NotificationControllerTest`: 7 tests
+  - `EventConsumerServiceTest`: 8 tests
+  - `CanonicalJsonUtilTest`: 2 tests
+  - `KafkaRetryDltServiceTest`: 7 tests
+  - `NotificationCleanupJobTest`: 1 test
+  - `UserGatewayProducerIntegrationTest`: 3 tests
+
+
 
 
 
