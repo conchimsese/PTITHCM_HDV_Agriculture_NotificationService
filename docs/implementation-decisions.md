@@ -101,5 +101,29 @@ Tham chiếu kỹ thuật: https://docs.spring.io/spring-boot/3.5/system-require
   - Cùng `eventId` nhưng payload khác nhau -> Ném `EventIdReusedException` báo vi phạm `EVENT_ID_REUSED`.
 - **Test Results:** 20/20 tests pass (3 FoundationTest, 7 NotificationControllerTest, 8 EventConsumerServiceTest, 2 CanonicalJsonUtilTest).
 
+## Hoàn thành Phase 4: Non-blocking Retry Topics (5s, 30s, 120s), DLT & Scheduled Retention Cleanup Job (27/10/2026)
+
+- **Cơ chế Non-blocking Retry (5s, 30s, 120s):**
+  - Triển khai `KafkaRetryDltService`: Quản lý 3 topic retry riêng biệt cho mỗi topic gốc $T$:
+    - $T\text{.notification-retry-1}$: delay 5s (attempt 2).
+    - $T\text{.notification-retry-2}$: delay 30s (attempt 3).
+    - $T\text{.notification-retry-3}$: delay 120s (attempt 4).
+  - Tách rời hoàn toàn khỏi thread listener chính (không `Thread.sleep`), bảo toàn throughput xử lý sự kiện.
+  - Sau attempt 4 hoặc khi gặp lỗi non-retryable (sai schema `InvalidEventException`, trùng lặp sai payload `EventIdReusedException`), lập tức chuyển tiếp đến topic Dead Letter Queue $T\text{.notification-dlt}$.
+- **DLT Metadata & Kiểm soát chuyển tiếp:**
+  - `DeadLetterRecord` lưu trữ đầy đủ ngữ cảnh thất bại: `originalTopic`, `originalPartition`, `originalOffset`, `eventId`, `correlationId`, `attempts`, `errorCode`, `errorMessage`, `failedAt` và `payload` gốc.
+  - Cam kết an toàn broker: Phải publish thành công vào topic Retry/DLT thì mới commit offset của message gốc; nếu forward gặp lỗi sẽ ném exception để giữ record, không bao giờ tự ý drop hoặc commit giả mạo.
+- **Scheduled Retention Cleanup Job:**
+  - `NotificationCleanupJob` kích hoạt định kỳ (`0 0 2 * * *`), xóa hàng loạt các thông báo trong bảng `notifications` có `created_at < now - 90 days`.
+  - **Bảo toàn Receipts**: Bản ghi `notification_receipts` không bị xóa để bảo vệ khả năng dedup vĩnh viễn trước các kịch bản replay lại sự kiện cũ.
+- **Test Results:** 28/28 tests pass:
+  - `FoundationTest`: 3 tests
+  - `NotificationControllerTest`: 7 tests
+  - `EventConsumerServiceTest`: 8 tests
+  - `CanonicalJsonUtilTest`: 2 tests
+  - `KafkaRetryDltServiceTest`: 7 tests
+  - `NotificationCleanupJobTest`: 1 test
+
+
 
 
